@@ -1,0 +1,31 @@
+# The real pipeline: every Monday (and on demand) download fresh World Bank data,
+# check it, and commit the updated CSVs in data/exports/ back to this repo.
+name: pipeline
+
+on:
+  schedule:
+    - cron: "17 6 * * 1"                              # 06:17 UTC every Monday (minute 17 avoids the busy :00 slot)
+  workflow_dispatch:                                  # adds a "Run workflow" button on the Actions tab
+
+permissions:
+  contents: write                                     # allow this workflow to push the updated CSVs
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - run: python -m pipeline.run                   # exits non-zero (and fails the run) if quality checks fail
+      - name: Commit updated exports if anything changed
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/exports
+          git diff --cached --quiet && echo "No changes" && exit 0     # nothing new -> stop quietly
+          git commit -m "Update World Bank data ($(date -u +%Y-%m-%d))"
+          git push

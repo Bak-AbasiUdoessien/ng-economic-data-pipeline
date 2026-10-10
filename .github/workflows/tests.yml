@@ -1,0 +1,52 @@
+# Runs on every push: unit tests, a full pipeline run against a real PostgreSQL
+# database, and a check that the Docker image builds.
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip                                  # reuse downloaded packages between runs (faster)
+      - run: pip install -r requirements-dev.txt
+      - run: python -m pytest -v
+
+  postgres-integration:
+    runs-on: ubuntu-latest
+    services:
+      postgres:                                       # GitHub starts a real PostgreSQL server next to the job
+        image: postgres:16
+        env:
+          POSTGRES_USER: etl
+          POSTGRES_PASSWORD: etl
+          POSTGRES_DB: economy
+        ports: ["5432:5432"]
+        options: >-                                   # wait until the database is ready before running steps
+          --health-cmd "pg_isready -U etl" --health-interval 5s --health-timeout 5s --health-retries 10
+    env:
+      DATABASE_URL: postgresql+psycopg://etl:etl@localhost:5432/economy
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - run: pip install -r requirements.txt
+      - name: Run the pipeline twice against PostgreSQL (second run proves it is re-runnable)
+        run: |
+          python -m pipeline.run --offline
+          python -m pipeline.run --offline
+
+  docker-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: docker build -t economic-pipeline .     # fails the job if the Dockerfile is broken
